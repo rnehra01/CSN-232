@@ -90,60 +90,62 @@ int main(int argc, char *argv[]) {
 } 
  
 /** 
- * Creates a random request and requests it ( 1 at a time)
+ * Creates a random request and requests it 
  * 
  * @param process number 
 */
 void *requestResource( int process ) { 
 	// sleep for a random period 
-	//sleep(rand() % MAX_RANDOM_WAIT); 
-	// loop variables
- 	int i, j;
+	//sleep(rand() % MAX_RANDOM_WAIT);
 
-	// generate and decide on a random request 
- 	for(i=0; i<resources; i++) {
-		// so long as this process needs this resource 
-		if (Need[process][i] > 0){
-			//randomly request a resource
-			int r = rand() % 100;	//pick a number (0, 100)
-			if (r > RAND_REQUEST){
-				//output the request
-				printf("Customer %d requested resource %d ", process, i);
-				//decide on the request
- 				if (bankers(process, i)){
-					//grant the request
-					printf(" -GRANTED process %d allocated resource %d\n", process, i);
-				} else { //deny the request
-					printf(" -DENIED process %d allocated resource %d\n", process, i);
-	} 	}	}	}
-
-	// check if the process completed with this resource request round
-	if( checkCompletion( process ) == TRUE ) { 
-		printf("Process %d has completed!\n",process); 
-		//simulate return of resource
-		sleep(rand() % MAX_RANDOM_WAIT); 
+	int Requests[resources];
+	// generate a random request vector
+	int it;
+	for(it=0; it<resources; it++) {
+		Requests[it] = 0;
+		if (Need[process][it]) Requests[it] = rand() % Need[process][it] + 1;
+		// this will always be less than what we need, so we dont have to check
+		printf("Process %d is requesting %d unit(s) from R%d.\n",process,Requests[it],it);
 	}
+	
+	if (bankers(process, Requests)){
+		printf(" -GRANTED process %d allocated resources\n", process);
+
+		// check if the process completed with this resource request round
+		if( checkCompletion( process ) == TRUE ) { 
+			printf("Process %d has completed!\n",process); 
+			//simulate return of resource
+			//sleep(rand() % MAX_RANDOM_WAIT); 
+		}
+	}else{
+		printf(" -DENIED process %d allocated resources\n", process);
+	}
+
 	is_running[process] = FALSE;
 	pthread_exit(NULL);
 } 
 
-int bankers(int process, int resource_id) { 
-	
-	//check if the resource is even available first
-	if (Available[resource_id] == 0){ 
-		printf(" -Unavailable resources-");
-		return FALSE; 
-		// process has to wait because the resources don't exist
-	}
-	
-	//otherwise, make a provisional allocation and check that state
-	pthread_mutex_lock(&mutex);
-	Available[resource_id] -= 1; 
-	Allocation[process][resource_id] += 1; 
-	Need[process][resource_id] -= 1; 
-	pthread_mutex_unlock(&mutex);
+int bankers(int process, int *Requests) { 
 	// loop variables
-	int i, j; 
+	int i, j;
+
+	//check if the resource is even available first
+	pthread_mutex_lock(&mutex);
+	for( i=0; i<resources; i++){
+		if (Available[i] < Requests[i]){ 
+			printf(" -Unavailable resources-");
+			pthread_mutex_unlock(&mutex);
+			return FALSE;
+		}	
+	}
+
+	//otherwise, make a provisional allocation and check that state	
+	for( i=0; i<resources; i++){
+		Available[i] -= Requests[i]; 
+		Allocation[process][i] += Requests[i]; 
+		Need[process][i] -= Requests[i];	
+	}
+	pthread_mutex_unlock(&mutex); 
 
 	// set up temp Available array 
 	int *temp_avail; 
@@ -162,9 +164,6 @@ int bankers(int process, int resource_id) {
  	for( i=0; i<processes; i++ ) { 
  		temp_finish[i] = Finish[i]; 
  	}
-	if (DEBUG){
-		printf("\nSequence: ");
-	}
 	// Find an index i such that... (the thread is not finished, but available is greater than need) 
 	for( i=0; i<processes; i++ ) {  
 		if( temp_finish[i] == FALSE ) { 
@@ -206,9 +205,11 @@ int bankers(int process, int resource_id) {
 			printf(" -Unsafe state-");
 			//undo provisional allocation
 			pthread_mutex_lock(&mutex);
-			Available[resource_id] += 1; 
-			Allocation[process][resource_id] -= 1; 
-			Need[process][resource_id] += 1;
+			for( i=0; i<resources; i++){
+				Available[i] += Requests[i]; 
+				Allocation[process][i] -= Requests[i]; 
+				Need[process][i] += Requests[i];	
+			}
 			pthread_mutex_unlock(&mutex); 
 			return FALSE; //UNSAFE
 		}
@@ -224,22 +225,21 @@ int bankers(int process, int resource_id) {
  * @param process number 
  * @return true if the process is complete 
  */
-int checkCompletion(int process) { 
+int checkCompletion(int process) {
 	int i, j;
 	for( i=0; i<resources; i++) { 
-		if( !(Allocation[process][i] >= Max[process][i])) 
+		if( !(Allocation[process][i] >= Max[process][i])){
 			return FALSE; 
-	}	 
+		}
+	}	
+	pthread_mutex_lock(&mutex); 
 	for(i=0; i<resources; i++ ) {
-		pthread_mutex_lock(&mutex);
-		Available[i] += Allocation[process][i];
-		pthread_mutex_unlock(&mutex);  
-	} 
-		 
+		Available[i] += Allocation[process][i];	  
+	}
+	pthread_mutex_unlock(&mutex);
 	// process is complete! 
 	Finish[process] = TRUE;  
 	return TRUE;  
-
 } 
 
 
