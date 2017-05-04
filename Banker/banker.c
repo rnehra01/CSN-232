@@ -24,7 +24,7 @@ int *Finish;
 int *is_request_pending;
 int random_request_generation  = TRUE;
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex;
 
 int main(int argc, char *argv[]) {
 
@@ -92,12 +92,11 @@ void *requestResource( int process ) {
 		if (random_request_generation){
 			Requests[it] = 0;
 			if (Need[process][it]) Requests[it] = rand() % Need[process][it] + 1;
+			printf("Process %d is requesting %d unit(s) from R%d.\n", process, Requests[it], it);
 		}else{
 			printf("Units of Resource %d Process %d requests", it, process);
 			scanf("%d", &Requests[it]);
 		}
-
-		printf("Process %d is requesting %d unit(s) from R%d.\n", process, Requests[it], it);
 	}
 	
 	if (bankers(process, Requests)){
