@@ -10,9 +10,11 @@
 int bankers(); 					//tabular algorithm to check need <= available
 void printResources(); 			
 void init( char * ); 			//loads configuration from file (string) in arg1
-void updateNeed( int ); 
+void updateNeed( int );
+void updateAvailable(); 
 void *requestResource( int );		//request a resource in a normal way
 int checkCompletion( int ); 
+int is_deadlock();
 int resources, processes; 
 int *Available; 
 int **Allocation; 
@@ -20,15 +22,16 @@ int **Max;
 int **Need; 
 int *Finish; 
 int *is_request_pending;
+int random_request_generation  = TRUE;
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int main(int argc, char *argv[]) {
 
 	if( argc < 2 ) { 
-		printf("usage: %s config_file\n", argv[0]); 
+		printf("usage: %s config_file random_request_generation\n", argv[0]); 
 	 		return 1; 
-	} 
+	}
 
 // set up variables using config file 
 	init(argv[1]);  
@@ -40,8 +43,16 @@ int main(int argc, char *argv[]) {
 		is_request_pending[i] = FALSE;
 	}
 
+	if (argc == 3) random_request_generation = atoi(argv[2]);
+
 	printf("Initialized...\n");
-	printResources();	
+	printResources();
+
+	if(is_deadlock()){
+		printf("DEADLOCK!!!\n");
+		return 0;
+	}
+
     //counts how many processes have yet to finish
 	int count;			
  	do {  
@@ -54,7 +65,7 @@ int main(int argc, char *argv[]) {
 				//requests a resource at random if process has no pending requests
 				if(!is_request_pending[i]){
 					int return_code;
-					printf("Creating request thread for process %d.\n", i);
+					//printf("Creating request thread for process %d.\n", i);
 					return_code = pthread_create(&threads[i], NULL, requestResource, (void *)i);
 					is_request_pending[i] = TRUE;
 					if (return_code) {
@@ -78,8 +89,14 @@ void *requestResource( int process ) {
 	// generate a random request vector
 	int it;
 	for(it=0; it<resources; it++) {
-		Requests[it] = 0;
-		if (Need[process][it]) Requests[it] = rand() % Need[process][it] + 1;
+		if (random_request_generation){
+			Requests[it] = 0;
+			if (Need[process][it]) Requests[it] = rand() % Need[process][it] + 1;
+		}else{
+			printf("Units of Resource %d Process %d requests", it, process);
+			scanf("%d", &Requests[it]);
+		}
+
 		printf("Process %d is requesting %d unit(s) from R%d.\n", process, Requests[it], it);
 	}
 	
@@ -188,6 +205,54 @@ int checkCompletion(int process){
 	return TRUE;  
 } 
 
+int is_deadlock(){
+	int i,j;
+	int *temp_avail; 
+	if( !(temp_avail = malloc( resources * sizeof( int ) ))) 
+		return -1; 
+ 	
+ 	for( i=0; i<resources; i++ ) { 
+ 		temp_avail[i] = Available[i]; 
+ 	} 
+	
+	// set up temp Finish array 
+	int *temp_finish; 
+	if( !(temp_finish = malloc( processes * sizeof( int ) ))) 
+		return -1; 
+
+ 	for( i=0; i<processes; i++ ) { 
+ 		temp_finish[i] = Finish[i]; 
+ 	}
+	// Apply safety algorithm to whether all the process can finish after above allocation 
+	for( i=0; i<processes; i++ ) {  
+		if( temp_finish[i] == FALSE ) { 
+			int process_i_can_finish = TRUE;
+			for( j=0; j<resources; j++ ) { 
+				if( Need[i][j] > temp_avail[j] ) {  
+					process_i_can_finish = FALSE;
+					break;
+ 				} 
+ 			} 
+			if (process_i_can_finish){
+				temp_finish[i] = TRUE;
+ 				for( j=0; j < resources; j++ ) { 
+					temp_avail[j] += Allocation[i][j]; 
+				}
+				i = -1;  
+			}
+		} 
+	} 
+	
+	//if one could not finish, then Deadlock
+	for( i=0; i<processes; i++ ) { 
+ 		if (temp_finish[i] == FALSE) {
+			printf(" -Unsafe state-"); 
+			return TRUE; //Deadlock
+		}
+ 	}
+	return FALSE;//SAFE
+}
+
 //Print current system status to the screen.  
 void printResources(){
 	int i, j;
@@ -254,7 +319,7 @@ void printResources(){
 } 
 
 //Reads a configuration file and sets the global variables as needed.  
-void init( char *filename ) { 
+void init( char *filename) { 
 	int i, j;
 	// open the config file 
 	FILE *file; 
@@ -294,18 +359,17 @@ void init( char *filename ) {
 	for( i=0; i<processes; i++ ) 
 		if( !(Max[i] = malloc( resources * sizeof( int ) ))) 
 	  	return; 
- 	// parse rest of lines: max requests by each process 
+ 	// parse next n(no fof processes) lines: max requests by each process 
 	i=0; 
-	while(fgets(buffer, MAX, file) != NULL) { 
+	for (i=0; i<processes; i++) {
+		fgets(buffer, MAX, file);
 		j=0; 
-		// we'll use a tokenizer to split the string on spaces 
 		tmp = strtok(buffer," "); 
 		while( tmp != NULL) { 
 			Max[i][j] = atoi(tmp); 
 			tmp = strtok(NULL, " "); 
 			j++; 
 		} 
-		i++; 
 	}
 
 	// set up Allocation array 
@@ -314,6 +378,20 @@ void init( char *filename ) {
 	for( i=0; i<processes; i++ ) 
 	 	if(!(Allocation[i] = malloc( resources * sizeof( int ) ))) 
 	  	return; 
+	// parse rest of lines: allocation for each process 
+	i=0; 
+	while (fgets(buffer, MAX, file) != NULL) {
+		j=0; 
+		tmp = strtok(buffer," "); 
+		while( tmp != NULL) { 
+			Allocation[i][j] = atoi(tmp); 
+			tmp = strtok(NULL, " "); 
+			j++; 
+		}
+		i++;
+	}
+
+	updateAvailable();
 
 	// set up Need array 
 	if( !(Need = malloc( processes * sizeof( int* ) ))) 
@@ -346,4 +424,15 @@ void updateNeed(int process){
 
 } 
 
+void updateAvailable(){ 
+	int i = 0;
+	int j = 0;
+	for( i=0; i<resources; i++ ){
+		pthread_mutex_lock(&mutex);
+		for (j=0; j<processes; j++)
+			Available[i] -= Allocation[j][i];
+		pthread_mutex_unlock(&mutex);
+	} 
+
+}
 
